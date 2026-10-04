@@ -1,6 +1,11 @@
 Release 9.1.1 (in development)
 ==============================
 
+Features added
+--------------
+
+* #14650: Intersphinx can load inventory data authored in TOML.
+
 Bugs fixed
 ----------
 

@@ -71,6 +71,158 @@ def test_read_inventory_v2_not_having_version() -> None:
     )
 
 
+def test_read_toml_inventory() -> None:
+    content = b"""\
+__project__ = "lua"
+__version__ = "5.5"
+
+[lua.function]
+assert = "manual.html#pdf-assert"
+debug.debug = "manual.html#pdf-debug.debug"
+anchored = "api.html#$"
+
+[py.function]
+some_func = ["SomeFunc", "not-even-a-thing.html#nowhere"]
+
+[lua.module]
+manual = "manual.html#module-manual"
+"""
+    inv = InventoryFile.loads(content, uri='https://example.org/docs/')
+
+    assert inv['lua:function', 'assert'] == _InventoryItem(
+        project_name='lua',
+        project_version='5.5',
+        uri='https://example.org/docs/manual.html#pdf-assert',
+        display_name='-',
+    )
+    assert inv['lua:function', 'debug.debug'] == _InventoryItem(
+        project_name='lua',
+        project_version='5.5',
+        uri='https://example.org/docs/manual.html#pdf-debug.debug',
+        display_name='-',
+    )
+    assert inv['py:function', 'some_func'] == _InventoryItem(
+        project_name='lua',
+        project_version='5.5',
+        uri='https://example.org/docs/not-even-a-thing.html#nowhere',
+        display_name='SomeFunc',
+    )
+    assert inv['lua:module', 'manual'].uri == (
+        'https://example.org/docs/manual.html#module-manual'
+    )
+    assert inv['lua:function', 'anchored'].uri == (
+        'https://example.org/docs/api.html#anchored'
+    )
+
+    inv = InventoryFile.loads(
+        b'__project__ = ""\n__version__ = ""\n[lua.function]\nassert = "manual.html"',
+        uri='https://example.org/docs/',
+    )
+    assert inv['lua:function', 'assert'].project_name == ''
+    assert inv['lua:function', 'assert'].project_version == ''
+
+
+@pytest.mark.parametrize(
+    ('content', 'error'),
+    [
+        (b'not = [valid TOML', 'invalid TOML inventory'),
+        (b'\xff', 'invalid TOML inventory'),
+        (b'__version__ = "1.0"\n[py.function]\nname = "name.html"', '__project__'),
+        (
+            b'__project__ = "project"\n[py.function]\nname = "name.html"',
+            '__version__',
+        ),
+        (
+            b'__project__ = 1\n__version__ = "1.0"\n[py.function]\nname = "name.html"',
+            '__project__',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = []\n[py.function]\nname = "name.html"',
+            '__version__',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.function]\nname = 1',
+            'invalid entry',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.function]\nname = ["only one"]',
+            'invalid entry',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.function]\nname = ["", "name.html"]',
+            'invalid entry',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.function]\nname = ""',
+            'invalid entry',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\npy = 1',
+            'invalid domain table',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py]\nname = "name.html"',
+            'invalid object table',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\npy = { function = "invalid" }',
+            'invalid object table',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.function]\n"" = "name.html"',
+            'empty object name',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n["bad:domain".function]\nname = "name.html"',
+            'invalid domain name',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n["".function]\nname = "name.html"',
+            'invalid domain name',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n["bad domain".function]\nname = "name.html"',
+            'invalid domain name',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py."bad:type"]\nname = "name.html"',
+            'invalid object type',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.""]\nname = "name.html"',
+            'invalid object type',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py."bad type"]\nname = "name.html"',
+            'invalid object type',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py]',
+            'invalid domain table',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.function]',
+            'invalid object table',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.function.empty]',
+            'empty object table',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"',
+            'at least one domain and object',
+        ),
+        (
+            b'__project__ = "project"\n__version__ = "1.0"\n[py.function]\na.b = "one"\n"a.b" = "two"',
+            'duplicate object name',
+        ),
+    ],
+)
+def test_read_invalid_toml_inventory(content: bytes, error: str) -> None:
+    with pytest.raises(ValueError, match=error):
+        InventoryFile.loads(content, uri='https://example.org/docs/')
+
+
 @pytest.mark.sphinx('html', testroot='root')
 def test_ambiguous_definition_warning(app: SphinxTestApp) -> None:
     InventoryFile.loads(INVENTORY_V2_AMBIGUOUS_TERMS, uri='/util')

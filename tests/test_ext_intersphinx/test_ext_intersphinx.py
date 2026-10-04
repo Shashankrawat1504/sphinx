@@ -253,6 +253,42 @@ def test_missing_reference(tmp_path, app):
 
 
 @pytest.mark.sphinx('html', testroot='root')
+def test_toml_inventory_reference(tmp_path, app):
+    inv_file = tmp_path / 'lua.toml'
+    inv_file.write_text(
+        """\
+__project__ = "lua"
+__version__ = "5.5"
+
+[py.function]
+some_func = ["SomeFunc", "not-even-a-thing.html#nowhere"]
+debug.debug = "manual.html#pdf-debug.debug"
+""",
+        encoding='utf-8',
+    )
+    set_config(
+        app,
+        {
+            'lua': ('https://lua.example/manual/', str(inv_file)),
+        },
+    )
+
+    validate_intersphinx_mapping(app, app.config)
+    load_mappings(app)
+
+    rn = reference_check(app, 'py', 'func', 'some_func', 'some_func')
+    assert isinstance(rn, nodes.reference)
+    assert rn['refuri'] == ('https://lua.example/manual/not-even-a-thing.html#nowhere')
+    assert rn['reftitle'] == '(in lua v5.5)'
+    assert rn[0].astext() == 'SomeFunc'
+
+    rn = reference_check(app, 'py', 'func', 'debug.debug', 'debug.debug')
+    assert isinstance(rn, nodes.reference)
+    assert rn['refuri'] == 'https://lua.example/manual/manual.html#pdf-debug.debug'
+    assert rn[0].astext() == 'debug.debug'
+
+
+@pytest.mark.sphinx('html', testroot='root')
 def test_missing_reference_pydomain(tmp_path, app):
     inv_file = tmp_path / 'inventory'
     inv_file.write_bytes(INVENTORY_V2)
