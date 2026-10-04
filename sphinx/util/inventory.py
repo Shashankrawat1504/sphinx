@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+import tomllib
 import warnings
 import zlib
 from typing import TYPE_CHECKING
@@ -59,8 +60,7 @@ class InventoryFile:
             unknown_version = format_line[27:].decode()
             msg = f'unknown or unsupported inventory version: {unknown_version!r}'
             raise ValueError(msg)
-        msg = f'invalid inventory header: {format_line.decode()}'
-        raise ValueError(msg)
+        return cls._loads_toml(format_line + b'\n' + content, uri=uri)
 
     @classmethod
     def load(cls, stream: _SupportsRead, uri: str, joinfunc: _JoinFunc) -> Inventory:
@@ -169,6 +169,117 @@ class InventoryFile:
                 type='intersphinx',
                 subtype='external',
             )
+        return inv
+
+    @classmethod
+    def _loads_toml(cls, content: bytes, *, uri: str) -> _Inventory:
+        try:
+            data = tomllib.loads(content.decode('utf-8'))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            msg = f'invalid TOML inventory: {exc}'
+            raise ValueError(msg) from exc
+
+        project_name = data.pop('__project__', None)
+        if not isinstance(project_name, str):
+            msg = "TOML inventory must define a string '__project__'"
+            raise ValueError(msg)  # NoQA: TRY004
+
+        project_version = data.pop('__version__', None)
+        if not isinstance(project_version, str):
+            msg = "TOML inventory must define a string '__version__'"
+            raise ValueError(msg)  # NoQA: TRY004
+
+        inv = _Inventory({})
+        for domain, object_types in data.items():
+            if (
+                not domain.strip()
+                or ':' in domain
+                or any(char.isspace() for char in domain)
+            ):
+                msg = f'invalid domain name in TOML inventory: {domain!r}'
+                raise ValueError(msg)
+            if not isinstance(object_types, dict) or not object_types:
+                msg = f'invalid domain table in TOML inventory: {domain!r}'
+                raise ValueError(msg)
+
+            for object_type, objects in object_types.items():
+                if (
+                    not object_type.strip()
+                    or ':' in object_type
+                    or any(char.isspace() for char in object_type)
+                ):
+                    msg = f'invalid object type in TOML inventory: {object_type!r}'
+                    raise ValueError(msg)
+                if not isinstance(objects, dict) or not objects:
+                    msg = (
+                        f'invalid object table in TOML inventory: '
+                        f'{domain}:{object_type}'
+                    )
+                    raise ValueError(msg)
+
+                def add_objects(
+                    domain_name: str,
+                    type_name: str,
+                    object_name: str,
+                    entries: dict[str, object],
+                ) -> None:
+                    for name, value in entries.items():
+                        if not name.strip():
+                            msg = (
+                                f'empty object name in TOML inventory: '
+                                f'{domain_name}:{type_name}'
+                            )
+                            raise ValueError(msg)
+                        full_name = f'{object_name}.{name}' if object_name else name
+                        if isinstance(value, dict):
+                            if not value:
+                                msg = (
+                                    f'empty object table in TOML inventory: '
+                                    f'{domain_name}:{type_name}:{full_name}'
+                                )
+                                raise ValueError(msg)
+                            add_objects(domain_name, type_name, full_name, value)
+                            continue
+                        if isinstance(value, str) and value:
+                            display_name = '-'
+                            location = value
+                        elif (
+                            isinstance(value, list)
+                            and len(value) == 2
+                            and all(isinstance(item, str) and item for item in value)
+                        ):
+                            display_name, location = value
+                        else:
+                            msg = (
+                                f'invalid entry for {domain_name}:{type_name}:'
+                                f'{full_name} in TOML inventory; expected a non-empty '
+                                'string location or a two-element array of non-empty '
+                                'strings (display name, location)'
+                            )
+                            raise ValueError(msg)
+
+                        if location.endswith('$'):
+                            location = location[:-1] + full_name
+                        location = posixpath.join(uri, location)
+                        inventory_type = f'{domain_name}:{type_name}'
+                        if (inventory_type, full_name) in inv:
+                            msg = (
+                                f'duplicate object name in TOML inventory: '
+                                f'{inventory_type}:{full_name}'
+                            )
+                            raise ValueError(msg)
+                        inv[inventory_type, full_name] = _InventoryItem(
+                            project_name=project_name,
+                            project_version=project_version,
+                            uri=location,
+                            display_name=display_name,
+                        )
+
+                add_objects(domain, object_type, '', objects)
+
+        if not inv.data:
+            msg = 'TOML inventory must contain at least one domain and object'
+            raise ValueError(msg)
         return inv
 
     @classmethod

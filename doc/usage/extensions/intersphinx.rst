@@ -133,6 +133,47 @@ linking:
                   ('../../otherbook/build/html/objects.inv', None)),
       }
 
+   **TOML inventories**
+
+   In addition to Sphinx inventory files, Intersphinx can load inventories
+   authored in TOML. Configure the TOML file as the inventory location in
+   :confval:`intersphinx_mapping` just as you would a v1 or v2 inventory file.
+   The format is detected from the file contents, so the file does not need a
+   particular extension. Local file paths are relative to the source directory;
+   remote files use the same fetch and cache behavior as other inventories.
+
+   A TOML inventory must define string values for ``__project__`` and
+   ``__version__``. Either may be empty, consistent with Sphinx inventory
+   files with an empty project name or version.
+   The remaining top-level tables are domains; each table inside a domain names
+   an object type. Within an object-type table, a string
+   value specifies a relative URI and uses the default display name (``-``).
+   A two-element array of strings specifies an explicit display name and
+   relative URI, in that order. Nested tables represent dotted object names;
+   for example, ``debug.debug`` is read as the object name ``debug.debug``.
+   Relative URIs are joined to the target URI, and a trailing ``$`` is
+   replaced with the object name, as in Sphinx inventory files. Absolute URLs
+   are not resolved specially; use relative URI paths.
+
+   For example, this file can be configured with
+   ``('https://www.lua.org/manual/5.5/', 'lua.toml')``:
+
+   .. code-block:: toml
+
+      __project__ = "lua"
+      __version__ = "5.5"
+
+      [lua.function]
+      assert = "manual.html#pdf-assert"
+      debug.debug = "manual.html#pdf-debug.debug"
+
+      [py.function]
+      some_func = ["SomeFunc", "not-even-a-thing.html#nowhere"]
+
+   TOML inventory entries must be non-empty strings or two-element arrays
+   containing non-empty strings. Other value types, additional entry fields,
+   and arrays of any other length are not supported.
+
 .. confval:: intersphinx_resolve_self
    :type: :code-py:`str`
    :default: :code-py:`''`
